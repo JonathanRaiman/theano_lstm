@@ -264,7 +264,7 @@ class StackedCells(object):
         """
         
         if prev_hiddens is None:
-            prev_hiddens = [layer.initial_hidden_state for layer in self.layers if hasattr(layer, 'initial_hidden_state')]
+            prev_hiddens = [layer.initial_hidden_state if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
         
         out = []
         layer_input = x
