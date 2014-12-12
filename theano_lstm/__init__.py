@@ -104,8 +104,12 @@ class Layer(object):
         """
         The hidden activation of the network
         """
-        return self.activation(
-            T.dot(self.linear_matrix, x) + self.bias_matrix )
+        if x.ndim > 1:
+            return self.activation(
+                T.dot(self.linear_matrix, x.T) + self.bias_matrix[:,None] ).T
+        else:  
+            return self.activation(
+                T.dot(self.linear_matrix, x) + self.bias_matrix )
 
 class Embedding(Layer):
     def __init__(self, vocabulary_size, hidden_size):
@@ -155,11 +159,18 @@ class RNN(Layer):
         """
         The hidden activation of the network
         """
-        return self.activation(
-            T.dot(
-                self.linear_matrix,
-                T.concatenate([x, h])
-            ) + self.bias_matrix )
+        if x.ndim > 1:
+            return self.activation(
+                T.dot(
+                    self.linear_matrix,
+                    T.concatenate([x, h], axis=-1).T
+                ) + self.bias_matrix[:,None] ).T
+        else:
+            return self.activation(
+                T.dot(
+                    self.linear_matrix,
+                    T.concatenate([x, h])
+                ) + self.bias_matrix )
     
 class LSTM(RNN):
     """
@@ -220,15 +231,23 @@ class LSTM(RNN):
         > [c, h] = f( x, [prev_c, prev_h] )
 
         """
-        #previous memory cell values
-        prev_c = h[:self.hidden_size]
-        
-        #previous activations of the hidden layer
-        prev_h = h[self.hidden_size:]
+        if h.ndim > 1:
+            #previous memory cell values
+            prev_c = h[:, :self.hidden_size]
+
+            #previous activations of the hidden layer
+            prev_h = h[:, self.hidden_size:]
+        else:
+
+            #previous memory cell values
+            prev_c = h[:self.hidden_size]
+            
+            #previous activations of the hidden layer
+            prev_h = h[self.hidden_size:]
         
         # input and previous hidden constitute the actual
         # input to the LSTM:
-        obs = T.concatenate([x, prev_h])
+        obs = T.concatenate([x, prev_h], axis=-1)
         
         # how much to add to the memory cells
         in_gate = self.in_gate.activate(obs)
@@ -248,7 +267,7 @@ class LSTM(RNN):
         # new hidden output
         next_h = out_gate * T.tanh(next_c)
         
-        return T.concatenate([next_c, next_h])
+        return T.concatenate([next_c, next_h], axis=-1)
 
 class StackedCells(object):
     """
@@ -293,12 +312,15 @@ class StackedCells(object):
             out.append(layer_input)
             # deliberate choice to change the upward structure here
             # in an RNN, there is only one kind of hidden values
-            if type(layer) is LSTM:
+            if isinstance(layer,LSTM):
                 # in this case the hidden activation has memory cells
                 # that are not shared upwards
                 # along with hidden activations that can be sent
                 # updwards
-                layer_input = layer_input[layer.hidden_size:]
+                if layer_input.ndim > 1:
+                    layer_input = layer_input[:, layer.hidden_size:]
+                else:
+                    layer_input = layer_input[layer.hidden_size:]
         return out
 
 def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e-6, rho=0.95, method = "adadelta"):
