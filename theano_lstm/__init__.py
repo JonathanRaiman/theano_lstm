@@ -106,6 +106,21 @@ class Layer(object):
         """
         return self.activation(
             T.dot(self.linear_matrix, x) + self.bias_matrix )
+
+class Embedding(Layer):
+    def __init__(self, vocabulary_size, hidden_size):
+        self.vocabulary_size = vocabulary_size
+        self.hidden_size = hidden_size
+        self.create_variables()
+        self.is_recursive = False
+        
+    def create_variables(self):
+        self.params = []
+        self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size)
+        self.params.append(self.embedding_matrix)
+        
+    def activate(self, x):
+        return self.embedding_matrix[x]
     
 class RNN(Layer):
     """

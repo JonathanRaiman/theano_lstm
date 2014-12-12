@@ -23,6 +23,9 @@
 *.gem
 *.pem
 
+
+*.egg-info
+
 # Saves #
 #########
 saves/*

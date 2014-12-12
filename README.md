@@ -12,6 +12,19 @@ some good optimizers for these types of networks.
 if placed in scan, so it should be set to 0 for now,
 and will be fixed in the future.
 
+### Key Features
+
+This module contains several Layer types that are useful
+for prediction and modeling from sequences:
+
+* A non-recurrent **Layer**, with a connection matrix W, and bias b
+* A recurrent **RNN Layer** that takes as input its previous hidden activation and has an initial hidden activation
+* A recurrent **LSTM Layer** that takes as input its previous hidden activation and memory cell values, and has initial values for both of those
+* An **Embedding** layer that contains an embedding matrix and takes integers as input and returns slices from its embedding matrix (e.g. word vectors)
+
+This module also contains the **SGD**, **AdaGrad**, and **AdaDelta** gradient descent methods that are constructed using an objective function and a set of theano variables, and returns an `updates` dictionary to pass to a theano function (see below).
+
+
 ### Usage
 
 Here is an example of usage with stacked LSTM units, using
