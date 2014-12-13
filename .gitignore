@@ -41,6 +41,9 @@ __pycache__/*
 .ipynb_checkpoints
 __pycache__
 
+build/
+dist/
+
 # Logs and databases #
 ######################
 *.log

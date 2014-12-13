@@ -163,7 +163,7 @@ class RNN(Layer):
             return self.activation(
                 T.dot(
                     self.linear_matrix,
-                    T.concatenate([x, h], axis=-1).T
+                    T.concatenate([x, h], axis=1).T
                 ) + self.bias_matrix[:,None] ).T
         else:
             return self.activation(
@@ -217,6 +217,12 @@ class LSTM(RNN):
 
         """
         return [self.initial_hidden_state] + [param for layer in self.internal_layers for param in layer.params]
+
+    def postprocess_activation(self, x):
+        if x.ndim > 1:
+            return x[:, self.hidden_size:]
+        else:
+            return x[self.hidden_size:]
         
     def activate(self, x, h):
         """
@@ -247,7 +253,10 @@ class LSTM(RNN):
         
         # input and previous hidden constitute the actual
         # input to the LSTM:
-        obs = T.concatenate([x, prev_h], axis=-1)
+        if h.ndim > 1:
+            obs = T.concatenate([x, prev_h], axis=1)
+        else:
+            obs = T.concatenate([x, prev_h])
         
         # how much to add to the memory cells
         in_gate = self.in_gate.activate(obs)
@@ -266,8 +275,11 @@ class LSTM(RNN):
         
         # new hidden output
         next_h = out_gate * T.tanh(next_c)
-        
-        return T.concatenate([next_c, next_h], axis=-1)
+
+        if h.ndim > 1:
+            return T.concatenate([next_c, next_h], axis=1)
+        else:
+            return T.concatenate([next_c, next_h])
 
 class StackedCells(object):
     """
@@ -296,7 +308,6 @@ class StackedCells(object):
         """
         Return new hidden activations for all stacked RNNs
         """
-        
         if prev_hiddens is None:
             prev_hiddens = [layer.initial_hidden_state if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
         
@@ -312,15 +323,12 @@ class StackedCells(object):
             out.append(layer_input)
             # deliberate choice to change the upward structure here
             # in an RNN, there is only one kind of hidden values
-            if isinstance(layer,LSTM):
+            if hasattr(layer, 'postprocess_activation'):
                 # in this case the hidden activation has memory cells
                 # that are not shared upwards
                 # along with hidden activations that can be sent
                 # updwards
-                if layer_input.ndim > 1:
-                    layer_input = layer_input[:, layer.hidden_size:]
-                else:
-                    layer_input = layer_input[layer.hidden_size:]
+                layer_input = layer.postprocess_activation(layer_input)
         return out
 
 def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e-6, rho=0.95, method = "adadelta"):
