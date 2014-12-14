@@ -6,7 +6,7 @@ def readfile(fname):
 
 setup(
     name='theano-lstm',
-    version='0.0.5',
+    version='0.0.6',
     description='Nano size theano lstm module',
     long_description=readfile('README.md'),
     ext_modules=[],

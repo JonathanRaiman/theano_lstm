@@ -20,6 +20,31 @@ from collections import OrderedDict
 
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
 
+
+class GradClip(theano.compile.ViewOp):
+    """
+    Here we clip the gradients as Alex Graves does in his
+    recurrent neural networks. In particular this prevents
+    explosion of gradients during backpropagation.
+
+    The original poster of this code was Alex Lamb,
+    [here](https://groups.google.com/forum/#!topic/theano-dev/GaJwGw6emK0).
+
+    """
+
+    def __init__(self, clip_lower_bound, clip_upper_bound):
+        self.clip_lower_bound = clip_lower_bound
+        self.clip_upper_bound = clip_upper_bound
+        assert(self.clip_upper_bound >= self.clip_lower_bound)
+
+    def grad(self, args, g_outs):
+        return [T.clip(g_out, self.clip_lower_bound, self.clip_upper_bound) for g_out in g_outs]
+
+def clip_gradient(x, bound):
+    grad_clip = GradClip(-bound, bound)
+    T.opt.register_canonicalize(theano.gof.OpRemove(grad_clip), name='grad_clip')
+    return grad_clip(x)
+
 def create_shared(out_size, in_size = None):
     """
     Creates a shared matrix or vector
@@ -83,10 +108,11 @@ class Layer(object):
 
     """
         
-    def __init__(self, input_size, hidden_size, activation):
+    def __init__(self, input_size, hidden_size, activation, clip_gradients = False):
         self.input_size  = input_size
         self.hidden_size = hidden_size
         self.activation  = activation
+        self.clip_gradients = clip_gradients
         self.is_recursive = False
         self.create_variables()
         
@@ -104,6 +130,9 @@ class Layer(object):
         """
         The hidden activation of the network
         """
+        if self.clip_gradients is not False:
+            x = clip_gradient(x, self.clip_gradients)
+
         if x.ndim > 1:
             return self.activation(
                 T.dot(self.linear_matrix, x.T) + self.bias_matrix[:,None] ).T
@@ -159,6 +188,9 @@ class RNN(Layer):
         """
         The hidden activation of the network
         """
+        if self.clip_gradients is not False:
+            x = clip_gradient(x, self.clip_gradients)
+            h = clip_gradient(h, self.clip_gradients)
         if x.ndim > 1:
             return self.activation(
                 T.dot(
@@ -193,13 +225,13 @@ class LSTM(RNN):
 
         """
         # input gate for cells
-        self.in_gate     = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid)
+        self.in_gate     = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid, self.clip_gradients)
         # forget gate for cells
-        self.forget_gate = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid)
+        self.forget_gate = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid, self.clip_gradients)
         # input modulation for cells
-        self.in_gate2    = Layer(self.input_size + self.hidden_size, self.hidden_size, self.activation)
+        self.in_gate2    = Layer(self.input_size + self.hidden_size, self.hidden_size, self.activation, self.clip_gradients)
         # output modulation
-        self.out_gate    = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid)
+        self.out_gate    = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid, self.clip_gradients)
         
         # keep these layers organized
         self.internal_layers = [self.in_gate, self.forget_gate, self.in_gate2, self.out_gate]
@@ -237,6 +269,7 @@ class LSTM(RNN):
         > [c, h] = f( x, [prev_c, prev_h] )
 
         """
+
         if h.ndim > 1:
             #previous memory cell values
             prev_c = h[:, :self.hidden_size]
@@ -373,7 +406,8 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
     lr = theano.shared(np.float64(lr).astype(theano.config.floatX))
     eps = np.float64(eps).astype(theano.config.floatX)
     rho = np.float64(rho).astype(theano.config.floatX)
-    max_norm = theano.shared(np.float64(max_norm).astype(theano.config.floatX))
+    if max_norm is not None and max_norm is not False:
+        max_norm = theano.shared(np.float64(max_norm).astype(theano.config.floatX))
 
     gsums   = [theano.shared(np.zeros_like(param.get_value(borrow=True))) if (method == 'adadelta' or method == 'adagrad') else None for param in params]
     xsums   = [theano.shared(np.zeros_like(param.get_value(borrow=True))) if method == 'adadelta' else None for param in params]
@@ -383,8 +417,9 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
 
     for gparam, param, gsum, xsum in zip(gparams, params, gsums, xsums):
         # clip gradients if they get too big
-        grad_norm = gparam.norm(L=2)
-        gparam = (T.minimum(max_norm, grad_norm)/ grad_norm) * gparam
+        if max_norm is not None and max_norm is not False:
+            grad_norm = gparam.norm(L=2)
+            gparam = (T.minimum(max_norm, grad_norm)/ grad_norm) * gparam
         
         if method == 'adadelta':
             updates[gsum] = T.cast(rho * gsum + (1. - rho) * (gparam **2), theano.config.floatX)
