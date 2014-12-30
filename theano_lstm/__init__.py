@@ -405,7 +405,7 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
     """
     lr = theano.shared(np.float64(lr).astype(theano.config.floatX))
     eps = np.float64(eps).astype(theano.config.floatX)
-    rho = np.float64(rho).astype(theano.config.floatX)
+    rho = theano.shared(np.float64(rho).astype(theano.config.floatX))
     if max_norm is not None and max_norm is not False:
         max_norm = theano.shared(np.float64(max_norm).astype(theano.config.floatX))
 
@@ -431,5 +431,8 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
             updates[param] =  T.cast(param - lr * (gparam / (T.sqrt(updates[gsum] + eps))), theano.config.floatX)
         else:
             updates[param] = param - gparam * lr
+
+    if method == 'adadelta':
+        lr = rho
 
     return updates, gsums, xsums, lr, max_norm
