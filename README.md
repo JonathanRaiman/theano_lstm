@@ -121,19 +121,23 @@ To use different length sequences, consider the following approach:
 * then record the length of the true labels (codelengths) needed before padding *c_1, c_2, ..., c_n*, and the length of the sequences before padding *l_1, l_2, ..., l_n*
 * pass the lengths, targets, and predictions to the masked loss as follows:
 
-	predictions, updates = theano.scan(prediction_step, etc...)
 
-	error = masked_loss(
-            predictions,
-            padded_labels,
-            codelengths,
-            label_starts).mean()
+
+		predictions, updates = theano.scan(prediction_step, etc...)
+
+		error = masked_loss(
+	            predictions,
+	            padded_labels,
+	            codelengths,
+	            label_starts).mean()
 
 Visually this goes something like this, for the case with three inputs, three outputs, but a single label for
 the final output:
 
 inputs  [ x_1 x_2 x_3 ]
+
 outputs [ p_1 p_2 p_3 ]
+
 labels  [ ... ... l_1 ]
 
 then we would have a matrix *x* with *x_1, x_2, x_3*, and `predictions` in the code above would contain *p_1, p_2, p_3*.
