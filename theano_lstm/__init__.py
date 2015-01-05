@@ -259,7 +259,7 @@ class LSTM(RNN):
         """
         return [self.initial_hidden_state] + [param for layer in self.internal_layers for param in layer.params]
 
-    def postprocess_activation(self, x):
+    def postprocess_activation(self, x, *args):
         if x.ndim > 1:
             return x[:, self.hidden_size:]
         else:
@@ -353,6 +353,9 @@ class GatedInput(RNN):
         else:
             gate = gate[0]
         
+        return x
+
+    def postprocess_activation(self, gate, x, h):
         return x * gate
 
 def apply_dropout(x, mask):
@@ -395,12 +398,12 @@ class StackedCells(object):
         layer_input = x
         for k, layer in enumerate(self.layers):
             if len(dropout) > 0:
-                layer_input = apply_dropout(layer_input, dropout[k])
+                level_out = apply_dropout(layer_input, dropout[k])
             if layer.is_recursive:
-                layer_input = layer.activate(layer_input, prev_hiddens[k])
+                level_out = layer.activate(level_out, prev_hiddens[k])
             else:
-                layer_input = layer.activate(layer_input)
-            out.append(layer_input)
+                level_out = layer.activate(layer_input)
+            out.append(level_out)
             # deliberate choice to change the upward structure here
             # in an RNN, there is only one kind of hidden values
             if hasattr(layer, 'postprocess_activation'):
@@ -408,7 +411,12 @@ class StackedCells(object):
                 # that are not shared upwards
                 # along with hidden activations that can be sent
                 # updwards
-                layer_input = layer.postprocess_activation(layer_input)
+                if layer.is_recursive:
+                    level_out = layer.postprocess_activation(level_out, layer_input, prev_hiddens[k])
+                else:
+                    level_out = layer.postprocess_activation(level_out, layer_input)
+
+            layer_input = level_out
 
         return out
 
