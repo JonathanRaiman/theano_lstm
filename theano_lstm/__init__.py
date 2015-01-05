@@ -175,7 +175,7 @@ class RNN(Layer):
 
     """
     def __init__(self, *args):
-        super().__init__(*args)
+        super(RNN, self).__init__(*args)
         self.is_recursive = True
         
     def create_variables(self):
