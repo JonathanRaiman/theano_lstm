@@ -22,13 +22,14 @@ for prediction and modeling from sequences:
 * A recurrent **LSTM Layer** that takes as input its previous hidden activation and memory cell values, and has initial values for both of those
 * An **Embedding** layer that contains an embedding matrix and takes integers as input and returns slices from its embedding matrix (e.g. word vectors)
 * A non-recurrent **GatedInput**, with a connection matrix W, and bias b, that multiplies a single scalar to each input (gating jointly multiple inputs)
+* Deals with exploding and vanishing gradients with a subgradient optimizer (Adadelta) and element-wise gradient clipping (à la Alex Graves)
 
 This module also contains the **SGD**, **AdaGrad**, and **AdaDelta** gradient descent methods that are constructed using an objective function and a set of theano variables, and returns an `updates` dictionary to pass to a theano function (see below).
 
 ### Usage
 
 Here is an example of usage with stacked LSTM units, using
-Adadelta to optimize, and using a scan op.
+Adadelta to optimize, and using a scan operation from Theano (a symbolic loop for backpropagation through time).
 
 
 	# bug for now forces us to use 0.0 with scan,

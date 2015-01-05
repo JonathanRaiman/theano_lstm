@@ -8,9 +8,10 @@ Implements most of the great things that came out
 in 2014 concerning recurrent neural networks, and
 some good optimizers for these types of networks.
 
-Note: Dropout causes gradient issues with theano if placed
-      in scan, so it should be set to 0 for now, and will be fixed
-      in the future.
+Note (from 5 January 2015): Dropout api is a bit sophisticated due to the way
+random number generators are dealt with in Theano's scan.
+An example of how to do dropout with this module will be added
+soon.
 
 """
 
