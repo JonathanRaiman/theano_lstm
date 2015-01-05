@@ -20,6 +20,8 @@ from collections import OrderedDict
 
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
 
+from .masked_loss import masked_loss, masked_loss_dx
+
 
 class GradClip(theano.compile.ViewOp):
     """
@@ -70,9 +72,9 @@ def create_shared(out_size, in_size = None):
     else:
         return theano.shared((np.random.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX))
     
-def Dropout(x, prob):
+def Dropout(shape, prob):
     """
-    Perform dropout (binomial noise) on x.
+    Return a dropout mask on x.
 
     The probability of a value in x going to zero is prob.
 
@@ -81,6 +83,7 @@ def Dropout(x, prob):
 
     x    theano variable : the variable to add noise to
     prob float, variable : probability of dropping an element.
+    size tuple(int, int) : size of the dropout mask.
 
 
     Outputs
@@ -90,9 +93,14 @@ def Dropout(x, prob):
 
     """
     
-    mask = srng.binomial(n=1, p=1-prob, size=x.shape)
-    y = x * T.cast(mask, theano.config.floatX)
-    return y
+    mask = srng.binomial(n=1, p=1-prob, size=shape)
+    return T.cast(mask, theano.config.floatX)
+
+def MultiDropout(shapes, dropout = 0.):
+    """
+    Return all the masks needed for dropout outside of a scan loop.
+    """
+    return [Dropout(shape, dropout) for shape in shapes]
 
 class Layer(object):
     """
@@ -314,6 +322,44 @@ class LSTM(RNN):
         else:
             return T.concatenate([next_c, next_h])
 
+class GatedInput(RNN):
+    def create_variables(self):
+        # input gate for cells
+        self.in_gate     = Layer(self.input_size + self.hidden_size, 1, T.nnet.sigmoid, self.clip_gradients)
+        self.internal_layers = [self.in_gate]
+
+    @property
+    def params(self):
+        """
+        Parameters given by the 4 gates and the
+        initial hidden activation of this LSTM cell
+        layer.
+
+        """
+        return [param for layer in self.internal_layers for param in layer.params]
+
+    def activate(self, x, h):
+        # input and previous hidden constitute the actual
+        # input to the LSTM:
+        if h.ndim > 1:
+            obs = T.concatenate([x, h], axis=1)
+        else:
+            obs = T.concatenate([x, h])
+
+        gate = self.in_gate.activate(obs)
+        if h.ndim > 1:
+            gate = gate[:,0][:,None]
+        else:
+            gate = gate[0]
+        
+        return x * gate
+
+def apply_dropout(x, mask):
+    if mask is not None:
+        return mask * x
+    else:
+        return x
+
 class StackedCells(object):
     """
     Sequentially connect several recurrent layers.
@@ -337,7 +383,7 @@ class StackedCells(object):
     def params(self):
         return [param for layer in self.layers for param in layer.params] 
             
-    def forward(self, x, prev_hiddens = None, dropout = 0.0):
+    def forward(self, x, prev_hiddens = None, dropout = []):
         """
         Return new hidden activations for all stacked RNNs
         """
@@ -347,8 +393,8 @@ class StackedCells(object):
         out = []
         layer_input = x
         for k, layer in enumerate(self.layers):
-            if dropout > 0 and k > 0:
-                layer_input = Dropout(layer_input, dropout)
+            if len(dropout) > 0:
+                layer_input = apply_dropout(layer_input, dropout[k])
             if layer.is_recursive:
                 layer_input = layer.activate(layer_input, prev_hiddens[k])
             else:
@@ -362,9 +408,10 @@ class StackedCells(object):
                 # along with hidden activations that can be sent
                 # updwards
                 layer_input = layer.postprocess_activation(layer_input)
+
         return out
 
-def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e-6, rho=0.95, method = "adadelta"):
+def create_optimization_updates(cost, params, updates=None, max_norm = 5.0, lr = 0.01, eps= 1e-6, rho=0.95, method = "adadelta"):
     """
     Get the updates for a gradient descent optimizer using
     SGD, AdaDelta, or AdaGrad.
@@ -413,7 +460,9 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
     xsums   = [theano.shared(np.zeros_like(param.get_value(borrow=True))) if method == 'adadelta' else None for param in params]
 
     gparams = T.grad(cost, params)
-    updates = OrderedDict()
+
+    if updates is None:
+        updates = OrderedDict()
 
     for gparam, param, gsum, xsum in zip(gparams, params, gsums, xsums):
         # clip gradients if they get too big
@@ -436,3 +485,20 @@ def create_optimization_updates(cost, params, max_norm = 5.0, lr = 0.01, eps= 1e
         lr = rho
 
     return updates, gsums, xsums, lr, max_norm
+
+__all__ = [
+    "create_optimization_updates",
+    "masked_loss",
+    "masked_loss_dx",
+    "clip_gradient",
+    "create_shared",
+    "Dropout",
+    "apply_dropout",
+    "StackedCells",
+    "Layer",
+    "LSTM",
+    "RNN",
+    "GatedInput",
+    "Embedding",
+    "MultiDropout"
+    ]

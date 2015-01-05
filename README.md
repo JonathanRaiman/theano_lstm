@@ -21,9 +21,9 @@ for prediction and modeling from sequences:
 * A recurrent **RNN Layer** that takes as input its previous hidden activation and has an initial hidden activation
 * A recurrent **LSTM Layer** that takes as input its previous hidden activation and memory cell values, and has initial values for both of those
 * An **Embedding** layer that contains an embedding matrix and takes integers as input and returns slices from its embedding matrix (e.g. word vectors)
+* A non-recurrent **GatedInput**, with a connection matrix W, and bias b, that multiplies a single scalar to each input (gating jointly multiple inputs)
 
 This module also contains the **SGD**, **AdaGrad**, and **AdaDelta** gradient descent methods that are constructed using an objective function and a set of theano variables, and returns an `updates` dictionary to pass to a theano function (see below).
-
 
 ### Usage
 
@@ -110,3 +110,35 @@ This is particularly useful to make sure of the GPU and other embarassingly para
 Generalization can be made to different sequence length if we accept the minor cost of forward-propagating parts of our graph we don't care about. To do this we make all sequences the same length by padding the end of the shorter ones with some symbol. Then use a binary matrix of the same size than all your minibatch sequences. The matrix has a 1 in areas when the error should be calculated, and zero otherwise. Elementwise mutliply this mask with your output, and then apply your objective function to this masked output. The error will be obtained everywhere, but will be zero in areas that were masked, yielding the correct error function.
 
 While there is some waste computation, the parallelization can offset this cost and make the overall computation faster.
+
+#### MaskedLoss usage
+
+To use different length sequences, consider the following approach:
+
+* you have sequences *y_1, y_2, ..., y_n*, and labels *l_1, l_2, ..., l_n*. 
+* pad all the sequences to the longest sequence *y_k*, and form a matrix **Y** of all padded sequences
+* similarly form the labels at each timestep for each padded sequence (with zeros, or some other symbol for labels in padded areas)
+* then record the length of the true labels (codelengths) needed before padding *c_1, c_2, ..., c_n*, and the length of the sequences before padding *l_1, l_2, ..., l_n*
+* pass the lengths, targets, and predictions to the masked loss as follows:
+
+	predictions, updates = theano.scan(prediction_step, etc...)
+
+	error = masked_loss(
+            predictions,
+            padded_labels,
+            codelengths,
+            label_starts).mean()
+
+Visually this goes something like this, for the case with three inputs, three outputs, but a single label for
+the final output:
+
+inputs  [ x_1 x_2 x_3 ]
+outputs [ p_1 p_2 p_3 ]
+labels  [ ... ... l_1 ]
+
+then we would have a matrix *x* with *x_1, x_2, x_3*, and `predictions` in the code above would contain *p_1, p_2, p_3*.
+We would then pass to `masked_loss` the codelength [ 1 ], since there is only "l_1" to predict, and the `label_starts` [ 2 ],
+indicating that errors should be computed at the third prediction (with zero index).
+
+
+
