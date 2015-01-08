@@ -352,11 +352,11 @@ class GatedInput(RNN):
             gate = gate[:,0][:,None]
         else:
             gate = gate[0]
-        
-        return x
+
+        return gate
 
     def postprocess_activation(self, gate, x, h):
-        return x * gate
+        return gate * x
 
 def apply_dropout(x, mask):
     if mask is not None:
@@ -392,17 +392,18 @@ class StackedCells(object):
         Return new hidden activations for all stacked RNNs
         """
         if prev_hiddens is None:
-            prev_hiddens = [layer.initial_hidden_state if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
+            prev_hiddens = [T.repeat(T.shape_padleft(layer.initial_hidden_state), x.shape[0], axis=0) if x.ndim > 1 else layer.initial_hidden_state if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
         
         out = []
         layer_input = x
         for k, layer in enumerate(self.layers):
+            level_out = layer_input
             if len(dropout) > 0:
                 level_out = apply_dropout(layer_input, dropout[k])
             if layer.is_recursive:
                 level_out = layer.activate(level_out, prev_hiddens[k])
             else:
-                level_out = layer.activate(layer_input)
+                level_out = layer.activate(level_out)
             out.append(level_out)
             # deliberate choice to change the upward structure here
             # in an RNN, there is only one kind of hidden values
