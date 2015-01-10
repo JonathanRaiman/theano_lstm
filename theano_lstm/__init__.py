@@ -22,6 +22,7 @@ from collections import OrderedDict
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
 
 from .masked_loss import masked_loss, masked_loss_dx
+from .shared_memory import wrap_params, borrow_memory, borrow_all_memories
 
 
 class GradClip(theano.compile.ViewOp):
@@ -45,7 +46,10 @@ class GradClip(theano.compile.ViewOp):
 
 def clip_gradient(x, bound):
     grad_clip = GradClip(-bound, bound)
-    T.opt.register_canonicalize(theano.gof.OpRemove(grad_clip), name='grad_clip')
+    try:
+        T.opt.register_canonicalize(theano.gof.OpRemove(grad_clip), name='grad_clip_%.1f' % (bound))
+    except ValueError:
+        pass
     return grad_clip(x)
 
 def create_shared(out_size, in_size = None):
@@ -392,7 +396,7 @@ class StackedCells(object):
         Return new hidden activations for all stacked RNNs
         """
         if prev_hiddens is None:
-            prev_hiddens = [T.repeat(T.shape_padleft(layer.initial_hidden_state), x.shape[0], axis=0) if x.ndim > 1 else layer.initial_hidden_state if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
+            prev_hiddens = [(T.repeat(T.shape_padleft(layer.initial_hidden_state), x.shape[0], axis=0) if x.ndim > 1 else layer.initial_hidden_state) if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
         
         out = []
         layer_input = x
@@ -510,5 +514,8 @@ __all__ = [
     "RNN",
     "GatedInput",
     "Embedding",
-    "MultiDropout"
+    "MultiDropout",
+    "wrap_params",
+    "borrow_memory",
+    "borrow_all_memories"
     ]
