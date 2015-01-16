@@ -375,7 +375,9 @@ class StackedCells(object):
     celltypes can be RNN or LSTM.
 
     """
-    def __init__(self, input_size, celltype=RNN, layers = [], activation = lambda x:x):
+    def __init__(self, input_size, celltype=RNN, layers=None, activation=lambda x:x):
+        if layers is None:
+            layers = []
         self.input_size = input_size
         self.create_layers(layers, activation, celltype)
         
@@ -391,10 +393,12 @@ class StackedCells(object):
     def params(self):
         return [param for layer in self.layers for param in layer.params] 
             
-    def forward(self, x, prev_hiddens = None, dropout = []):
+    def forward(self, x, prev_hiddens=None, dropout=None):
         """
         Return new hidden activations for all stacked RNNs
         """
+        if dropout is None:
+            dropout = []
         if prev_hiddens is None:
             prev_hiddens = [(T.repeat(T.shape_padleft(layer.initial_hidden_state), x.shape[0], axis=0) if x.ndim > 1 else layer.initial_hidden_state) if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
         
