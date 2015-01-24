@@ -263,6 +263,15 @@ class LSTM(RNN):
         """
         return [self.initial_hidden_state] + [param for layer in self.internal_layers for param in layer.params]
 
+    @params.setter
+    def params(self, param_list):
+        self.initial_hidden_state = param_list[0]
+        start = 1
+        for layer in self.internal_layers:
+            end = start + len(layer.params)
+            layer.params = param_list[start:end]
+            start = end
+
     def postprocess_activation(self, x, *args):
         if x.ndim > 1:
             return x[:, self.hidden_size:]
@@ -343,6 +352,14 @@ class GatedInput(RNN):
         """
         return [param for layer in self.internal_layers for param in layer.params]
 
+    @params.setter
+    def params(self, param_list):
+        start = 0
+        for layer in self.internal_layers:
+            end = start + len(layer.params)
+            layer.params = param_list[start:end]
+            start = end
+
     def activate(self, x, h):
         # input and previous hidden constitute the actual
         # input to the LSTM:
@@ -391,7 +408,15 @@ class StackedCells(object):
     
     @property
     def params(self):
-        return [param for layer in self.layers for param in layer.params] 
+        return [param for layer in self.layers for param in layer.params]
+
+    @params.setter
+    def params(self, param_list):
+        start = 0
+        for layer in self.layers:
+            end = start + len(layer.params)
+            layer.params = param_list[start:end]
+            start = end
             
     def forward(self, x, prev_hiddens=None, dropout=None):
         """
