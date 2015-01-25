@@ -121,7 +121,7 @@ class Layer(object):
 
     """
         
-    def __init__(self, input_size, hidden_size, activation, clip_gradients = False):
+    def __init__(self, input_size, hidden_size, activation, clip_gradients=False):
         self.input_size  = input_size
         self.hidden_size = hidden_size
         self.activation  = activation
@@ -179,8 +179,8 @@ class RNN(Layer):
     Note: x and h are concatenated in the activation.
 
     """
-    def __init__(self, *args):
-        super(RNN, self).__init__(*args)
+    def __init__(self, *args, **kwargs):
+        super(RNN, self).__init__(*args, **kwargs)
         self.is_recursive = True
         
     def create_variables(self):
@@ -265,11 +265,12 @@ class LSTM(RNN):
 
     @params.setter
     def params(self, param_list):
-        self.initial_hidden_state = param_list[0]
+        self.initial_hidden_state.set_value(param_list[0].get_value())
         start = 1
         for layer in self.internal_layers:
             end = start + len(layer.params)
-            layer.params = param_list[start:end]
+            for p, p_new in zip(layer.params, param_list[start:end]):
+                p.set_value(p_new.get_value())
             start = end
 
     def postprocess_activation(self, x, *args):
@@ -357,7 +358,8 @@ class GatedInput(RNN):
         start = 0
         for layer in self.internal_layers:
             end = start + len(layer.params)
-            layer.params = param_list[start:end]
+            for p, p_new in zip(layer.params, param_list[start:end]):
+                p.set_value(p_new.get_value())
             start = end
 
     def activate(self, x, h):
@@ -392,17 +394,20 @@ class StackedCells(object):
     celltypes can be RNN or LSTM.
 
     """
-    def __init__(self, input_size, celltype=RNN, layers=None, activation=lambda x:x):
+    def __init__(self, input_size, celltype=RNN, layers=None,
+                 activation=lambda x:x, clip_gradients=False):
         if layers is None:
             layers = []
         self.input_size = input_size
+        self.clip_gradients = clip_gradients
         self.create_layers(layers, activation, celltype)
         
     def create_layers(self, layer_sizes, activation_type, celltype):
         self.layers = []
         prev_size   = self.input_size
         for k, layer_size in enumerate(layer_sizes):
-            layer = celltype(prev_size, layer_size, activation_type)
+            layer = celltype(prev_size, layer_size, activation_type,
+                             clip_gradients=self.clip_gradients)
             self.layers.append(layer)
             prev_size = layer_size
     
@@ -415,7 +420,8 @@ class StackedCells(object):
         start = 0
         for layer in self.layers:
             end = start + len(layer.params)
-            layer.params = param_list[start:end]
+            for p, p_new in zip(layer.params, param_list[start:end]):
+                p.set_value(p_new.get_value())
             start = end
             
     def forward(self, x, prev_hiddens=None, dropout=None):
