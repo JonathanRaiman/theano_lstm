@@ -8,10 +8,6 @@ Implements most of the great things that came out
 in 2014 concerning recurrent neural networks, and
 some good optimizers for these types of networks.
 
-**Note**: Dropout causes gradient issues with theano
-if placed in scan, so it should be set to 0 for now,
-and will be fixed in the future.
-
 ### Key Features
 
 This module contains several Layer types that are useful
