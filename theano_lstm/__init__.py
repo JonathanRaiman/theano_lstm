@@ -10,8 +10,6 @@ some good optimizers for these types of networks.
 
 Note (from 5 January 2015): Dropout api is a bit sophisticated due to the way
 random number generators are dealt with in Theano's scan.
-An example of how to do dropout with this module will be added
-soon.
 
 """
 
