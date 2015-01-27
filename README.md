@@ -31,8 +31,6 @@ This module also contains the **SGD**, **AdaGrad**, and **AdaDelta** gradient de
 Here is an example of usage with stacked LSTM units, using
 Adadelta to optimize, and using a scan operation from Theano (a symbolic loop for backpropagation through time).
 
-
-	# bug for now forces us to use 0.0 with scan,
 	dropout = 0.0
 
 	model = StackedCells(4, layers=[20, 20], activation=T.tanh, celltype=LSTM)
@@ -145,5 +143,48 @@ then we would have a matrix *x* with *x_1, x_2, x_3*, and `predictions` in the c
 We would then pass to `masked_loss` the codelength [ 1 ], since there is only "l_1" to predict, and the `label_starts` [ 2 ],
 indicating that errors should be computed at the third prediction (with zero index).
 
+#### Dropout Usage
 
+To get dropout to work and be dynamically modifyiable without recompiling let's consider the following usage example.
 
+First we define a variable with the likelihood that a neuron will be dropped (randomly set to 0):
+
+	dropout = theano.shared(np.float64(0.3).astype(theano.config.floatX))
+	deterministic = False # for now
+
+Create some model:
+
+	model = theano_lstm.StackedCells(50, layers=[100], celltype=theano_lstm.LSTM, activation=T.tanh)
+
+Now we want to introduce dropout noise between the input and the LSTM. To use Dropout outside of a Theano `scan` loop you could simply multiply elementwise by a binomial random variable ([see examples here](https://gist.github.com/SnippyHolloW/8a0f820261926e2f41cc)), but if you plan on using recurrent networks with a Theano `scan` you need to call your random numbers outside of the loop.
+
+In order to keep track of these dropout activations we'll generate *masks*. *Masks* are a list with all the realizations of binomials. We generate this list with `MultiDropout`, a special function in the `theano_lstm` module that takes different hidden layer sizes and returns a list of matrices with binomial random variable realizations inside:
+
+	if dropout.get_value() > 0:
+        if deterministic:
+            # just multiply by the likelihood of being kept:
+            masks = [np.float32(1.) - self.dropout for i in range(2)]
+        else:
+            shapes = [50, 100]
+            masks = theano_lstm.MultiDropout( [(x.shape[0], shape) for shape in shapes] if x.ndim > 1 else shapes,
+                                                            self.dropout)
+    else:
+        masks = []
+
+Now our loop forward function is as follows:
+
+	def step(obs, hidden_state, *masks):
+        new_state = model.forward(obs, [hidden_state], list(masks))
+        return new_state[1]
+
+We pass it to Theano's scan:
+
+    result, _ = theano.scan(step,
+    	sequences     = seq,
+    	non_sequences = masks,
+    	outputs_info  = [dict(initial=model.layers[0].initial_hidden_state, taps=[-1])]
+    	)
+
+And We're done.
+
+**Note:** To not use *Masks* pass an empty list `[]` instead.
