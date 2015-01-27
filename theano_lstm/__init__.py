@@ -44,6 +44,7 @@ class GradClip(theano.compile.ViewOp):
     def grad(self, args, g_outs):
         return [T.clip(g_out, self.clip_lower_bound, self.clip_upper_bound) for g_out in g_outs]
 
+
 def clip_gradient(x, bound):
     grad_clip = GradClip(-bound, bound)
     try:
@@ -51,6 +52,7 @@ def clip_gradient(x, bound):
     except ValueError:
         pass
     return grad_clip(x)
+
 
 def create_shared(out_size, in_size = None):
     """
@@ -76,7 +78,8 @@ def create_shared(out_size, in_size = None):
         return theano.shared((np.random.standard_normal([out_size])* 1./out_size).astype(theano.config.floatX))
     else:
         return theano.shared((np.random.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX))
-    
+
+
 def Dropout(shape, prob):
     """
     Return a dropout mask on x.
@@ -101,11 +104,13 @@ def Dropout(shape, prob):
     mask = srng.binomial(n=1, p=1-prob, size=shape)
     return T.cast(mask, theano.config.floatX)
 
+
 def MultiDropout(shapes, dropout = 0.):
     """
     Return all the masks needed for dropout outside of a scan loop.
     """
     return [Dropout(shape, dropout) for shape in shapes]
+
 
 class Layer(object):
     """
@@ -133,12 +138,9 @@ class Layer(object):
         """
         Create the connection matrix and the bias vector
         """
-        self.params = []
         self.linear_matrix        = create_shared(self.hidden_size, self.input_size)
         self.bias_matrix          = create_shared(self.hidden_size)
-        self.params.append(self.linear_matrix)
-        self.params.append(self.bias_matrix)
-        
+
     def activate(self, x):
         """
         The hidden activation of the network
@@ -153,6 +155,16 @@ class Layer(object):
             return self.activation(
                 T.dot(self.linear_matrix, x) + self.bias_matrix )
 
+    @property
+    def params(self):
+        return [self.linear_matrix, self.bias_matrix]
+
+    @params.setter
+    def params(self, param_list):
+        self.linear_matrix.set_value(param_list[0].get_value())
+        self.bias_matrix.set_value(param_list[1].get_value())
+
+
 class Embedding(Layer):
     def __init__(self, vocabulary_size, hidden_size):
         self.vocabulary_size = vocabulary_size
@@ -161,13 +173,20 @@ class Embedding(Layer):
         self.is_recursive = False
         
     def create_variables(self):
-        self.params = []
         self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size)
-        self.params.append(self.embedding_matrix)
-        
+
     def activate(self, x):
         return self.embedding_matrix[x]
-    
+
+    @property
+    def params(self):
+        return [self.embedding_matrix]
+
+    @params.setter
+    def params(self, param_list):
+        self.embedding_matrix.set_value(param_list[0].get_value())
+
+
 class RNN(Layer):
     """
     Special recurrent layer than takes as input
@@ -189,14 +208,10 @@ class RNN(Layer):
         and the base hidden activation.
 
         """
-        self.params = []
         self.linear_matrix        = create_shared(self.hidden_size, self.input_size+ self.hidden_size)
         self.bias_matrix          = create_shared(self.hidden_size)
-        self.params.append(self.linear_matrix)
-        self.params.append(self.bias_matrix)
         self.initial_hidden_state = create_shared(self.hidden_size)
-        self.params.append(self.initial_hidden_state)
-        
+
     def activate(self, x, h):
         """
         The hidden activation of the network
@@ -216,7 +231,19 @@ class RNN(Layer):
                     self.linear_matrix,
                     T.concatenate([x, h])
                 ) + self.bias_matrix )
-    
+
+    @property
+    def params(self):
+        return [self.linear_matrix, self.bias_matrix,
+                self.initial_hidden_state]
+
+    @params.setter
+    def params(self, param_list):
+        self.linear_matrix.set_value(param_list[0].get_value())
+        self.bias_matrix.set_value(param_list[1].get_value())
+        self.initial_hidden_state.set_value(param_list[2].get_value())
+
+
 class LSTM(RNN):
     """
     The structure of the LSTM allows it to learn on problems with
@@ -245,10 +272,10 @@ class LSTM(RNN):
         self.in_gate2    = Layer(self.input_size + self.hidden_size, self.hidden_size, self.activation, self.clip_gradients)
         # output modulation
         self.out_gate    = Layer(self.input_size + self.hidden_size, self.hidden_size, T.nnet.sigmoid, self.clip_gradients)
-        
+
         # keep these layers organized
         self.internal_layers = [self.in_gate, self.forget_gate, self.in_gate2, self.out_gate]
-        
+
         # store the memory cells in first n spots, and store the current
         # output in the next n spots:
         self.initial_hidden_state = create_shared(self.hidden_size * 2)
@@ -259,9 +286,10 @@ class LSTM(RNN):
         Parameters given by the 4 gates and the
         initial hidden activation of this LSTM cell
         layer.
-
         """
-        return [self.initial_hidden_state] + [param for layer in self.internal_layers for param in layer.params]
+        return ([self.initial_hidden_state] +
+                [param for layer in self.internal_layers
+                 for param in layer.params])
 
     @params.setter
     def params(self, param_list):
@@ -269,8 +297,7 @@ class LSTM(RNN):
         start = 1
         for layer in self.internal_layers:
             end = start + len(layer.params)
-            for p, p_new in zip(layer.params, param_list[start:end]):
-                p.set_value(p_new.get_value())
+            layer.params = param_list[start:end]
             start = end
 
     def postprocess_activation(self, x, *args):
@@ -337,6 +364,7 @@ class LSTM(RNN):
         else:
             return T.concatenate([next_c, next_h])
 
+
 class GatedInput(RNN):
     def create_variables(self):
         # input gate for cells
@@ -351,15 +379,15 @@ class GatedInput(RNN):
         layer.
 
         """
-        return [param for layer in self.internal_layers for param in layer.params]
+        return [param for layer in self.internal_layers
+                for param in layer.params]
 
     @params.setter
     def params(self, param_list):
         start = 0
         for layer in self.internal_layers:
             end = start + len(layer.params)
-            for p, p_new in zip(layer.params, param_list[start:end]):
-                p.set_value(p_new.get_value())
+            layer.params = param_list[start:end]
             start = end
 
     def activate(self, x, h):
@@ -381,11 +409,13 @@ class GatedInput(RNN):
     def postprocess_activation(self, gate, x, h):
         return gate * x
 
+
 def apply_dropout(x, mask):
     if mask is not None:
         return mask * x
     else:
         return x
+
 
 class StackedCells(object):
     """
@@ -420,8 +450,7 @@ class StackedCells(object):
         start = 0
         for layer in self.layers:
             end = start + len(layer.params)
-            for p, p_new in zip(layer.params, param_list[start:end]):
-                p.set_value(p_new.get_value())
+            layer.params = param_list[start:end]
             start = end
             
     def forward(self, x, prev_hiddens=None, dropout=None):
@@ -431,7 +460,11 @@ class StackedCells(object):
         if dropout is None:
             dropout = []
         if prev_hiddens is None:
-            prev_hiddens = [(T.repeat(T.shape_padleft(layer.initial_hidden_state), x.shape[0], axis=0) if x.ndim > 1 else layer.initial_hidden_state) if hasattr(layer, 'initial_hidden_state') else None for layer in self.layers ]
+            prev_hiddens = [(T.repeat(T.shape_padleft(layer.initial_hidden_state),
+                                      x.shape[0], axis=0)
+                             if x.ndim > 1 else layer.initial_hidden_state)
+                            if hasattr(layer, 'initial_hidden_state') else None
+                            for layer in self.layers]
         
         out = []
         layer_input = x
@@ -460,7 +493,10 @@ class StackedCells(object):
 
         return out
 
-def create_optimization_updates(cost, params, updates=None, max_norm = 5.0, lr = 0.01, eps= 1e-6, rho=0.95, method = "adadelta"):
+
+def create_optimization_updates(cost, params, updates=None, max_norm=5.0,
+                                lr=0.01, eps=1e-6, rho=0.95,
+                                method = "adadelta"):
     """
     Get the updates for a gradient descent optimizer using
     SGD, AdaDelta, or AdaGrad.
@@ -534,6 +570,7 @@ def create_optimization_updates(cost, params, updates=None, max_norm = 5.0, lr =
         lr = rho
 
     return updates, gsums, xsums, lr, max_norm
+
 
 __all__ = [
     "create_optimization_updates",
