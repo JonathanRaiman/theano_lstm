@@ -18,6 +18,7 @@ import numpy as np
 from collections import OrderedDict
 
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
+np_rng = np.random.RandomState()
 
 from .masked_loss import masked_loss, masked_loss_dx
 from .shared_memory import wrap_params, borrow_memory, borrow_all_memories
@@ -52,7 +53,7 @@ def clip_gradient(x, bound):
     return grad_clip(x)
 
 
-def create_shared(out_size, in_size = None):
+def create_shared(out_size, in_size=None, name=None):
     """
     Creates a shared matrix or vector
     using the given in_size and out_size.
@@ -73,9 +74,11 @@ def create_shared(out_size, in_size = None):
     """
 
     if in_size is None:
-        return theano.shared((np.random.standard_normal([out_size])* 1./out_size).astype(theano.config.floatX))
+        return theano.shared((np_rng.standard_normal([out_size])* 1./out_size).astype(theano.config.floatX),
+                             name=name)
     else:
-        return theano.shared((np.random.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX))
+        return theano.shared((np_rng.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX),
+                             name=name)
 
 
 def Dropout(shape, prob):
@@ -136,8 +139,8 @@ class Layer(object):
         """
         Create the connection matrix and the bias vector
         """
-        self.linear_matrix        = create_shared(self.hidden_size, self.input_size)
-        self.bias_matrix          = create_shared(self.hidden_size)
+        self.linear_matrix        = create_shared(self.hidden_size, self.input_size, name="Layer.linear_matrix")
+        self.bias_matrix          = create_shared(self.hidden_size, name="Layer.bias_matrix")
 
     def activate(self, x):
         """
@@ -171,7 +174,7 @@ class Embedding(Layer):
         self.is_recursive = False
         
     def create_variables(self):
-        self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size)
+        self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size, name='Embedding.embedding_matrix')
 
     def activate(self, x):
         return self.embedding_matrix[x]
@@ -206,9 +209,9 @@ class RNN(Layer):
         and the base hidden activation.
 
         """
-        self.linear_matrix        = create_shared(self.hidden_size, self.input_size+ self.hidden_size)
-        self.bias_matrix          = create_shared(self.hidden_size)
-        self.initial_hidden_state = create_shared(self.hidden_size)
+        self.linear_matrix        = create_shared(self.hidden_size, self.input_size+ self.hidden_size, name="RNN.linear_matrix")
+        self.bias_matrix          = create_shared(self.hidden_size, name="RNN.bias_matrix")
+        self.initial_hidden_state = create_shared(self.hidden_size, name="RNN.initial_hidden_state")
 
     def activate(self, x, h):
         """
@@ -276,7 +279,7 @@ class LSTM(RNN):
 
         # store the memory cells in first n spots, and store the current
         # output in the next n spots:
-        self.initial_hidden_state = create_shared(self.hidden_size * 2)
+        self.initial_hidden_state = create_shared(self.hidden_size * 2, name="LSTM.initial_hidden_state")
         
     @property
     def params(self):
