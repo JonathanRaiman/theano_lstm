@@ -74,11 +74,13 @@ def create_shared(out_size, in_size=None, name=None):
     """
 
     if in_size is None:
-        return theano.shared((np_rng.standard_normal([out_size])* 1./out_size).astype(theano.config.floatX),
-                             name=name)
+        return theano.shared(random_initialization((out_size, )), name=name)
     else:
-        return theano.shared((np_rng.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX),
-                             name=name)
+        return theano.shared(random_initialization((out_size, in_size)), name=name)
+
+
+def random_initialization(size):
+    return (np_rng.standard_normal(size) * 1. / size[0]).astype(theano.config.floatX)
 
 
 def Dropout(shape, prob):
@@ -235,14 +237,12 @@ class RNN(Layer):
 
     @property
     def params(self):
-        return [self.linear_matrix, self.bias_matrix,
-                self.initial_hidden_state]
+        return [self.linear_matrix, self.bias_matrix]
 
     @params.setter
     def params(self, param_list):
         self.linear_matrix.set_value(param_list[0].get_value())
         self.bias_matrix.set_value(param_list[1].get_value())
-        self.initial_hidden_state.set_value(param_list[2].get_value())
 
 
 class LSTM(RNN):
@@ -288,14 +288,11 @@ class LSTM(RNN):
         initial hidden activation of this LSTM cell
         layer.
         """
-        return ([self.initial_hidden_state] +
-                [param for layer in self.internal_layers
-                 for param in layer.params])
+        return [param for layer in self.internal_layers for param in layer.params]
 
     @params.setter
     def params(self, param_list):
-        self.initial_hidden_state.set_value(param_list[0].get_value())
-        start = 1
+        start = 0
         for layer in self.internal_layers:
             end = start + len(layer.params)
             layer.params = param_list[start:end]
@@ -306,7 +303,7 @@ class LSTM(RNN):
             return x[:, self.hidden_size:]
         else:
             return x[self.hidden_size:]
-        
+
     def activate(self, x, h):
         """
         The hidden activation, h, of the network, along
@@ -331,32 +328,33 @@ class LSTM(RNN):
 
             #previous memory cell values
             prev_c = h[:self.hidden_size]
-            
+
             #previous activations of the hidden layer
             prev_h = h[self.hidden_size:]
-        
+
         # input and previous hidden constitute the actual
         # input to the LSTM:
         if h.ndim > 1:
             obs = T.concatenate([x, prev_h], axis=1)
         else:
             obs = T.concatenate([x, prev_h])
-        
+
+        # TODO could we combine these 4 linear transformations for efficiency? (e.g., http://arxiv.org/pdf/1410.4615.pdf, page 5)
         # how much to add to the memory cells
         in_gate = self.in_gate.activate(obs)
-        
+
         # how much to forget the current contents of the memory
         forget_gate = self.forget_gate.activate(obs)
-        
+
         # modulate the input for the memory cells
         in_gate2 = self.in_gate2.activate(obs)
-        
+
         # new memory cells
         next_c = forget_gate * prev_c + in_gate2 * in_gate
-        
+
         # modulate the memory cells to create the new output
         out_gate = self.out_gate.activate(obs)
-        
+
         # new hidden output
         next_h = out_gate * T.tanh(next_c)
 
