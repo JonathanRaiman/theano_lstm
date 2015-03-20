@@ -12,33 +12,33 @@ class MaskedLossDx(gof.Op):
         y_lengths = T.as_tensor_variable(y_lengths)
         y_startidxes = T.as_tensor_variable(y_startidxes)
         g_costs = T.as_tensor_variable(g_costs)
-        
+
         if (softmaxes.type.ndim != 3 or
             softmaxes.type.dtype not in T.float_dtypes):
             raise ValueError('dy must be 3-d tensor of floats', softmaxes.type)
-        
+
         if (y_idxes.type.ndim != 2 or
             y_idxes.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_idxes must be 2-d tensor of integers', y_idxes.type)
-            
+
         if (y_lengths.type.ndim != 1 or
             y_lengths.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_lengths must be 1-d tensor of integers', y_lengths.type)
-        
+
         if (y_startidxes.type.ndim != 1 or
             y_startidxes.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_startidxes must be 1-d tensor of integers', y_startidxes.type)
-            
+
         if (g_costs.type.ndim != 1 or
             g_costs.type.dtype not in T.float_dtypes):
             raise ValueError('g_costs must be 1-d tensor of floats', g_costs.type)
-        
+
         return Apply(self, [softmaxes, y_idxes, y_lengths, y_startidxes, g_costs],
                      [T.Tensor(dtype=softmaxes.dtype, broadcastable=softmaxes.type.broadcastable)()])
-    
+
     def perform(self, node, input_storage, output_storage):
         softmaxes, y_idxes, y_lengths, y_startidxes, g_costs = input_storage
-        
+
         dx = np.zeros_like(softmaxes)
         for i in range(y_lengths.shape[0]):
             # take the total cost to be the errors made
@@ -49,12 +49,12 @@ class MaskedLossDx(gof.Op):
                ] -= 1./(softmaxes[i,
                               np.arange(y_startidxes[i], y_startidxes[i] + y_lengths[i]),
                               y_idxes[i, y_startidxes[i]:y_startidxes[i]+y_lengths[i]]] * g_costs[i])
-            
+
         output_storage[0][0] = dx
-        
+
     def c_code_cache_version(self):
         return (3,)
-    
+
     def __init__(self, **kwargs):
         gof.Op.__init__(self, **kwargs)
 
@@ -66,7 +66,7 @@ class MaskedLossDx(gof.Op):
 
     def __str__(self):
         return self.__class__.__name__
-        
+
     def c_code(self, node, name, inp, out, sub):
         softmaxes, y_idxes, y_lengths, y_startidxes, g_costs = inp
         dx, = out
@@ -129,7 +129,7 @@ class MaskedLossDx(gof.Op):
         }
 
 
-        
+
         // for all examples index i is used
         for (size_t i = 0; i < PyArray_DIMS(%(y_lengths)s)[0]; ++i)
         {
@@ -165,23 +165,30 @@ class MaskedLossDx(gof.Op):
 
             for (size_t j = 0 ; j < y_lengths_i; ++j)
             {
-                dx_i[(y_startidxes_i + j) * Sdx + idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] * Sdx_dist] = -1. / ( 
+                if (idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] < 0 || idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] >= PyArray_DIMS(%(softmaxes)s)[2]) {
+                    PyErr_Format(PyExc_ValueError,
+                         "Softmax Index for KL Divergence is out of range ( %%ld  not in [0, %%ld]",
+                         (long int)idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride],
+                         (long int)PyArray_DIMS(%(softmaxes)s)[2]);
+                    %(fail)s;
+                }
+                dx_i[(y_startidxes_i + j) * Sdx + idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] * Sdx_dist] = -1. / (
                 softmaxes_i[(y_startidxes_i + j) * Ssm + idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] * Ssm_dist] * g_costs_i + eps);
             }
 
         }
         """ % dict(locals(), **sub)
-    
+
     def grad(self, *args):
         raise NotImplementedError()
-        
+
 masked_loss_dx = MaskedLossDx()
 
 class MaskedLoss(gof.Op):
     nin = 3
     nout = 1
     """Masked Loss for sequence"""
-    
+
     def perform(self, node, input_storage, output_storage):
         softmaxes, y_idxes, y_lengths, y_startidxes = input_storage
         prediction_cost = np.zeros(y_lengths.shape[0], dtype=softmaxes.dtype)
@@ -194,7 +201,7 @@ class MaskedLoss(gof.Op):
                                                    ]).sum()
 
         output_storage[0][0] = prediction_cost
-        
+
     def c_code(self, node, name, inp, out, sub):
         softmaxes, y_idxes, y_lengths, y_startidxes = inp
         errors, = out
@@ -281,14 +288,20 @@ class MaskedLoss(gof.Op):
             const dtype_%(y_lengths) s y_lengths_i = ((dtype_%(y_lengths)s*)(PyArray_BYTES(%(y_lengths)s) + y_lengths_stride * i))[0];
             const dtype_%(y_startidxes) s y_startidxes_i = ((dtype_%(y_startidxes)s*)(PyArray_BYTES(%(y_startidxes)s) + y_startidxes_stride * i))[0];
 
-            for (size_t j = 0 ; j < y_lengths_i; ++j)
-            {
+            for (size_t j = 0 ; j < y_lengths_i; ++j) {
+                if (idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] < 0 || idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] >= PyArray_DIMS(%(softmaxes)s)[2]) {
+                    PyErr_Format(PyExc_ValueError,
+                         "Softmax Index for KL Divergence is out of range ( %%ld  not in [0, %%ld]",
+                         (long int)idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride],
+                         (long int)PyArray_DIMS(%(softmaxes)s)[2]);
+                    %(fail)s;
+                }
                 errors_i[0] -= log( softmaxes_i[(y_startidxes_i + j) * Ssm + idxes_i[(y_startidxes_i + j) * y_idxes_temp_stride] * Ssm_dist]);
             }
 
         }
         """ % dict(locals(), **sub)
-        
+
     def make_node(self, softmaxes, y_idxes, y_lengths, y_startidxes, **kwargs):
         softmaxes = T.as_tensor_variable(softmaxes)
         y_idxes = T.as_tensor_variable(y_idxes)
@@ -297,22 +310,22 @@ class MaskedLoss(gof.Op):
         if (softmaxes.type.ndim != 3 or
             softmaxes.type.dtype not in T.float_dtypes):
             raise ValueError('dy must be 3-d tensor of floats', softmaxes.type)
-        
+
         if (y_idxes.type.ndim != 2 or
             y_idxes.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_idxes must be 2-d tensor of integers', y_idxes.type)
-            
+
         if (y_lengths.type.ndim != 1 or
             y_lengths.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_lengths must be 1-d tensor of integers', y_lengths.type)
-        
+
         if (y_startidxes.type.ndim != 1 or
             y_startidxes.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_startidxes must be 1-d tensor of integers', y_startidxes.type)
-        
+
         return Apply(self, [softmaxes, y_idxes, y_lengths, y_startidxes], [
             T.Tensor(dtype=softmaxes.dtype, broadcastable=[False])()])
-        
+
     def grad(self, inp, grads):
         softmaxes, y_idxes, y_lengths, y_startidxes = inp
         g_costs, = grads
@@ -333,11 +346,11 @@ class MaskedSumDx(gof.Op):
         y_lengths = T.as_tensor_variable(y_lengths)
         y_starts = T.as_tensor_variable(y_starts)
         g_costs = T.as_tensor_variable(g_costs)
-        
+
         if (y.type.ndim != 3 or
             y.type.dtype not in T.float_dtypes):
             raise ValueError('y must be 3-d tensor of floats', y.type)
-            
+
         if (y_lengths.type.ndim != 1 or
             y_lengths.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_lengths must be 1-d tensor of integers', y_lengths.type)
@@ -345,27 +358,27 @@ class MaskedSumDx(gof.Op):
         if (y_starts.type.ndim != 1 or
             y_starts.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_starts must be 1-d tensor of integers', y_starts.type)
-            
+
         if (g_costs.type.ndim != 1 or
             g_costs.type.dtype not in T.float_dtypes):
             raise ValueError('g_costs must be 1-d tensor of floats', g_costs.type)
-        
+
         return Apply(self, [y, y_starts, y_lengths, g_costs],
                      [T.Tensor(dtype=y.dtype, broadcastable=y.type.broadcastable)()])
-    
+
     def perform(self, node, input_storage, output_storage):
         y, y_starts, y_lengths, g_costs = input_storage
-        
+
         dx = np.zeros_like(y)
         for i in range(y_starts.shape[0]):
             # d/dx x = 1:
             dx[i, y_starts[i]:y_starts+y_lengths[i],:] = g_costs[i]
-            
+
         output_storage[0][0] = dx
-        
+
     def c_code_cache_version(self):
         return (3,)
-    
+
     def __init__(self, **kwargs):
         gof.Op.__init__(self, **kwargs)
 
@@ -377,7 +390,7 @@ class MaskedSumDx(gof.Op):
 
     def __str__(self):
         return self.__class__.__name__
-        
+
     def c_code(self, node, name, inp, out, sub):
         y, y_starts, y_lengths, g_costs = inp
         dx, = out
@@ -447,7 +460,7 @@ class MaskedSumDx(gof.Op):
         }
 
 
-        
+
         // for all examples index i is used
         for (size_t i = 0; i < PyArray_DIMS(%(y_starts)s)[0]; ++i)
         {
@@ -479,15 +492,15 @@ class MaskedSumDx(gof.Op):
                 {
                     dx_i[(y_starts_i + j) * Sdx + k * Sdx_dist] = g_costs_i;
                 }
-                
+
             }
 
         }
         """ % dict(locals(), **sub)
-    
+
     def grad(self, *args):
         raise NotImplementedError()
-        
+
 masked_sum_dx = MaskedSumDx()
 
 class MaskedSum(gof.Op):
@@ -499,11 +512,11 @@ class MaskedSum(gof.Op):
         y = T.as_tensor_variable(y)
         y_lengths = T.as_tensor_variable(y_lengths)
         y_starts = T.as_tensor_variable(y_starts)
-        
+
         if (y.type.ndim != 3 or
             y.type.dtype not in T.float_dtypes):
             raise ValueError('y must be 3-d tensor of floats', y.type)
-            
+
         if (y_lengths.type.ndim != 1 or
             y_lengths.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_lengths must be 1-d tensor of integers', y_lengths.type)
@@ -511,20 +524,20 @@ class MaskedSum(gof.Op):
         if (y_starts.type.ndim != 1 or
             y_starts.type.dtype not in T.discrete_dtypes):
             raise ValueError('y_starts must be 1-d tensor of integers', y_starts.type)
-        
+
         return Apply(self, [y, y_starts, y_lengths],
                      [T.Tensor(dtype=y.dtype, broadcastable=y.type.broadcastable)()])
-    
+
     def perform(self, node, input_storage, output_storage):
         y, y_starts, y_lengths = input_storage
-        
+
         masked_acc = np.zeros([y.shape[0]], dtype=y.dtype)
         for i in range(y_starts.shape[0]):
             # sum along row / column i
             masked_acc[i] = y[i, y_starts[i]:y_starts+y_lengths[i],:].sum()
 
         output_storage[0][0] = masked_acc
-        
+
     def c_code(self, node, name, inp, out, sub):
         softmaxes, y_idxes, y_lengths, y_startidxes = inp
         errors, = out
@@ -618,12 +631,12 @@ class MaskedSum(gof.Op):
 
         }
         """ % dict(locals(), **sub)
-        
+
     def grad(self, inp, grads):
         y, y_starts, y_lengths, = inp
         g_costs, = grads
         return [masked_sum_dx(y, y_starts, y_lengths, g_costs),
                 grad_not_implemented(self, 1, y_starts),
                 grad_not_implemented(self, 1, y_lengths)]
-    
+
 masked_loss = MaskedLoss()
