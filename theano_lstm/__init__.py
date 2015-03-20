@@ -18,7 +18,7 @@ import numpy as np
 from collections import OrderedDict
 
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
-np_rng = np.random.RandomState()
+np_rng = np.random.RandomState(1234)
 
 from .masked_loss import masked_loss, masked_loss_dx
 from .shared_memory import wrap_params, borrow_memory, borrow_all_memories
