@@ -18,6 +18,7 @@ import numpy as np
 from collections import OrderedDict
 
 srng = theano.tensor.shared_randomstreams.RandomStreams(1234)
+np_rng = np.random.RandomState(1234)
 
 from .masked_loss import masked_loss, masked_loss_dx
 from .shared_memory import wrap_params, borrow_memory, borrow_all_memories
@@ -52,7 +53,7 @@ def clip_gradient(x, bound):
     return grad_clip(x)
 
 
-def create_shared(out_size, in_size = None):
+def create_shared(out_size, in_size=None, name=None):
     """
     Creates a shared matrix or vector
     using the given in_size and out_size.
@@ -73,9 +74,13 @@ def create_shared(out_size, in_size = None):
     """
 
     if in_size is None:
-        return theano.shared((np.random.standard_normal([out_size])* 1./out_size).astype(theano.config.floatX))
+        return theano.shared(random_initialization((out_size, )), name=name)
     else:
-        return theano.shared((np.random.standard_normal([out_size, in_size])* 1./out_size).astype(theano.config.floatX))
+        return theano.shared(random_initialization((out_size, in_size)), name=name)
+
+
+def random_initialization(size):
+    return (np_rng.standard_normal(size) * 1. / size[0]).astype(theano.config.floatX)
 
 
 def Dropout(shape, prob):
@@ -136,8 +141,8 @@ class Layer(object):
         """
         Create the connection matrix and the bias vector
         """
-        self.linear_matrix        = create_shared(self.hidden_size, self.input_size)
-        self.bias_matrix          = create_shared(self.hidden_size)
+        self.linear_matrix        = create_shared(self.hidden_size, self.input_size, name="Layer.linear_matrix")
+        self.bias_matrix          = create_shared(self.hidden_size, name="Layer.bias_matrix")
 
     def activate(self, x):
         """
@@ -171,7 +176,7 @@ class Embedding(Layer):
         self.is_recursive = False
         
     def create_variables(self):
-        self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size)
+        self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size, name='Embedding.embedding_matrix')
 
     def activate(self, x):
         return self.embedding_matrix[x]
@@ -206,9 +211,9 @@ class RNN(Layer):
         and the base hidden activation.
 
         """
-        self.linear_matrix        = create_shared(self.hidden_size, self.input_size+ self.hidden_size)
-        self.bias_matrix          = create_shared(self.hidden_size)
-        self.initial_hidden_state = create_shared(self.hidden_size)
+        self.linear_matrix        = create_shared(self.hidden_size, self.input_size+ self.hidden_size, name="RNN.linear_matrix")
+        self.bias_matrix          = create_shared(self.hidden_size, name="RNN.bias_matrix")
+        self.initial_hidden_state = create_shared(self.hidden_size, name="RNN.initial_hidden_state")
 
     def activate(self, x, h):
         """
@@ -232,14 +237,12 @@ class RNN(Layer):
 
     @property
     def params(self):
-        return [self.linear_matrix, self.bias_matrix,
-                self.initial_hidden_state]
+        return [self.linear_matrix, self.bias_matrix]
 
     @params.setter
     def params(self, param_list):
         self.linear_matrix.set_value(param_list[0].get_value())
         self.bias_matrix.set_value(param_list[1].get_value())
-        self.initial_hidden_state.set_value(param_list[2].get_value())
 
 
 class LSTM(RNN):
@@ -276,7 +279,7 @@ class LSTM(RNN):
 
         # store the memory cells in first n spots, and store the current
         # output in the next n spots:
-        self.initial_hidden_state = create_shared(self.hidden_size * 2)
+        self.initial_hidden_state = create_shared(self.hidden_size * 2, name="LSTM.initial_hidden_state")
         
     @property
     def params(self):
@@ -285,14 +288,11 @@ class LSTM(RNN):
         initial hidden activation of this LSTM cell
         layer.
         """
-        return ([self.initial_hidden_state] +
-                [param for layer in self.internal_layers
-                 for param in layer.params])
+        return [param for layer in self.internal_layers for param in layer.params]
 
     @params.setter
     def params(self, param_list):
-        self.initial_hidden_state.set_value(param_list[0].get_value())
-        start = 1
+        start = 0
         for layer in self.internal_layers:
             end = start + len(layer.params)
             layer.params = param_list[start:end]
@@ -303,7 +303,7 @@ class LSTM(RNN):
             return x[:, self.hidden_size:]
         else:
             return x[self.hidden_size:]
-        
+
     def activate(self, x, h):
         """
         The hidden activation, h, of the network, along
@@ -328,32 +328,33 @@ class LSTM(RNN):
 
             #previous memory cell values
             prev_c = h[:self.hidden_size]
-            
+
             #previous activations of the hidden layer
             prev_h = h[self.hidden_size:]
-        
+
         # input and previous hidden constitute the actual
         # input to the LSTM:
         if h.ndim > 1:
             obs = T.concatenate([x, prev_h], axis=1)
         else:
             obs = T.concatenate([x, prev_h])
-        
+
+        # TODO could we combine these 4 linear transformations for efficiency? (e.g., http://arxiv.org/pdf/1410.4615.pdf, page 5)
         # how much to add to the memory cells
         in_gate = self.in_gate.activate(obs)
-        
+
         # how much to forget the current contents of the memory
         forget_gate = self.forget_gate.activate(obs)
-        
+
         # modulate the input for the memory cells
         in_gate2 = self.in_gate2.activate(obs)
-        
+
         # new memory cells
         next_c = forget_gate * prev_c + in_gate2 * in_gate
-        
+
         # modulate the memory cells to create the new output
         out_gate = self.out_gate.activate(obs)
-        
+
         # new hidden output
         next_h = out_gate * T.tanh(next_c)
 
