@@ -103,7 +103,7 @@ def Dropout(shape, prob):
     y    theano variable : x with the noise multiplied.
 
     """
-    
+
     mask = srng.binomial(n=1, p=1-prob, size=shape)
     return T.cast(mask, theano.config.floatX)
 
@@ -128,7 +128,7 @@ class Layer(object):
     > y = f ( W * x + b )
 
     """
-        
+
     def __init__(self, input_size, hidden_size, activation, clip_gradients=False):
         self.input_size  = input_size
         self.hidden_size = hidden_size
@@ -136,7 +136,7 @@ class Layer(object):
         self.clip_gradients = clip_gradients
         self.is_recursive = False
         self.create_variables()
-        
+
     def create_variables(self):
         """
         Create the connection matrix and the bias vector
@@ -154,7 +154,7 @@ class Layer(object):
         if x.ndim > 1:
             return self.activation(
                 T.dot(self.linear_matrix, x.T) + self.bias_matrix[:,None] ).T
-        else:  
+        else:
             return self.activation(
                 T.dot(self.linear_matrix, x) + self.bias_matrix )
 
@@ -174,7 +174,7 @@ class Embedding(Layer):
         self.hidden_size = hidden_size
         self.create_variables()
         self.is_recursive = False
-        
+
     def create_variables(self):
         self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size, name='Embedding.embedding_matrix')
 
@@ -204,7 +204,7 @@ class RNN(Layer):
     def __init__(self, *args, **kwargs):
         super(RNN, self).__init__(*args, **kwargs)
         self.is_recursive = True
-        
+
     def create_variables(self):
         """
         Create the connection matrix and the bias vector,
@@ -256,7 +256,7 @@ class LSTM(RNN):
     periods of time. Here we implement the LSTM from Graves et al.
     (2013).
     """
-        
+
     def create_variables(self):
         """
         Create the different LSTM gates and
@@ -280,7 +280,6 @@ class LSTM(RNN):
         # store the memory cells in first n spots, and store the current
         # output in the next n spots:
         self.initial_hidden_state = create_shared(self.hidden_size * 2, name="LSTM.initial_hidden_state")
-        
     @property
     def params(self):
         """
@@ -338,7 +337,6 @@ class LSTM(RNN):
             obs = T.concatenate([x, prev_h], axis=1)
         else:
             obs = T.concatenate([x, prev_h])
-
         # TODO could we combine these 4 linear transformations for efficiency? (e.g., http://arxiv.org/pdf/1410.4615.pdf, page 5)
         # how much to add to the memory cells
         in_gate = self.in_gate.activate(obs)
@@ -430,7 +428,7 @@ class StackedCells(object):
         self.input_size = input_size
         self.clip_gradients = clip_gradients
         self.create_layers(layers, activation, celltype)
-        
+
     def create_layers(self, layer_sizes, activation_type, celltype):
         self.layers = []
         prev_size   = self.input_size
@@ -439,7 +437,7 @@ class StackedCells(object):
                              clip_gradients=self.clip_gradients)
             self.layers.append(layer)
             prev_size = layer_size
-    
+
     @property
     def params(self):
         return [param for layer in self.layers for param in layer.params]
@@ -451,7 +449,7 @@ class StackedCells(object):
             end = start + len(layer.params)
             layer.params = param_list[start:end]
             start = end
-            
+
     def forward(self, x, prev_hiddens=None, dropout=None):
         """
         Return new hidden activations for all stacked RNNs
@@ -464,7 +462,7 @@ class StackedCells(object):
                              if x.ndim > 1 else layer.initial_hidden_state)
                             if hasattr(layer, 'initial_hidden_state') else None
                             for layer in self.layers]
-        
+
         out = []
         layer_input = x
         for k, layer in enumerate(self.layers):
@@ -495,7 +493,7 @@ class StackedCells(object):
 
 def create_optimization_updates(cost, params, updates=None, max_norm=5.0,
                                 lr=0.01, eps=1e-6, rho=0.95,
-                                method = "adadelta"):
+                                method = "adadelta", gradients = None):
     """
     Get the updates for a gradient descent optimizer using
     SGD, AdaDelta, or AdaGrad.
@@ -543,7 +541,7 @@ def create_optimization_updates(cost, params, updates=None, max_norm=5.0,
     gsums   = [theano.shared(np.zeros_like(param.get_value(borrow=True))) if (method == 'adadelta' or method == 'adagrad') else None for param in params]
     xsums   = [theano.shared(np.zeros_like(param.get_value(borrow=True))) if method == 'adadelta' else None for param in params]
 
-    gparams = T.grad(cost, params)
+    gparams = T.grad(cost, params) if gradients is None else gradients
 
     if updates is None:
         updates = OrderedDict()
@@ -553,7 +551,7 @@ def create_optimization_updates(cost, params, updates=None, max_norm=5.0,
         if max_norm is not None and max_norm is not False:
             grad_norm = gparam.norm(L=2)
             gparam = (T.minimum(max_norm, grad_norm)/ grad_norm) * gparam
-        
+
         if method == 'adadelta':
             updates[gsum] = T.cast(rho * gsum + (1. - rho) * (gparam **2), theano.config.floatX)
             dparam = -T.sqrt((xsum + eps) / (updates[gsum] + eps)) * gparam
