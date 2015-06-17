@@ -23,7 +23,6 @@ np_rng = np.random.RandomState(1234)
 from .masked_loss import masked_loss, masked_loss_dx
 from .shared_memory import wrap_params, borrow_memory, borrow_all_memories
 
-
 class GradClip(theano.compile.ViewOp):
     """
     Here we clip the gradients as Alex Graves does in his
@@ -169,7 +168,18 @@ class Layer(object):
 
 
 class Embedding(Layer):
+    """
+    A Matrix useful for storing word vectors or other distributed
+    representations.
+
+    use #activate(T.iscalar()) or #activate(T.ivector()) to embed
+    a symbol.
+    """
     def __init__(self, vocabulary_size, hidden_size):
+        """
+        Vocabulary size is the number of different symbols to store,
+        and hidden_size is the size of their embedding.
+        """
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
         self.create_variables()
@@ -179,6 +189,19 @@ class Embedding(Layer):
         self.embedding_matrix = create_shared(self.vocabulary_size, self.hidden_size, name='Embedding.embedding_matrix')
 
     def activate(self, x):
+        """
+        Inputs
+        ------
+
+        x T.ivector() or T.iscalar() : indices to embed
+
+        Output
+        ------
+
+        embedding : self.embedding_matrix[x]
+
+        """
+
         return self.embedding_matrix[x]
 
     @property
@@ -244,6 +267,55 @@ class RNN(Layer):
         self.linear_matrix.set_value(param_list[0].get_value())
         self.bias_matrix.set_value(param_list[1].get_value())
 
+class GRU(RNN):
+    def create_variables(self):
+        self.reset_layer = theano_lstm.RNN(self.input_size, self.hidden_size, activation = T.nnet.sigmoid)
+        self.memory_interpolation_layer = theano_lstm.RNN(self.input_size, self.hidden_size, activation = T.nnet.sigmoid)
+        self.memory_to_memory_layer = theano_lstm.RNN(self.input_size, self.hidden_size, activation = T.tanh)
+        self.internal_layers = [
+            self.reset_layer,
+            self.memory_interpolation_layer,
+            self.memory_to_memory_layer
+        ]
+
+    @property
+    def params(self):
+        return [param for layer in self.internal_layers for param in layer.params]
+
+    @params.setter
+    def params(self, param_list):
+        assert(len(param_list) == 6)
+        self.reset_layer.params                = param_list[0:2]
+        self.memory_interpolation_layer.params = param_list[2:4]
+        self.memory_to_memory_layer.params     = param_list[4:6]
+    
+    def activate(self, x, h):
+        reset_gate = self.reset_layer.activate(
+            x,
+            h
+        )
+
+        # the new state dampened by resetting
+        reset_h = reset_gate * h;
+
+        # the new hidden state:
+        candidate_h = self.memory_to_memory_layer.activate(
+            x,
+            reset_h
+        )
+
+        # how much to update the new hidden state:
+        update_gate = self.memory_interpolation_layer.activate(
+            x,
+            h
+        )
+
+        # the new state interploated between candidate and old:
+        new_h = (
+            h      * (1.0 - update_gate) +
+            candidate_h * update_gate
+        )
+        return new_h
 
 class LSTM(RNN):
     """
@@ -550,7 +622,7 @@ def create_optimization_updates(cost, params, updates=None, max_norm=5.0,
         # clip gradients if they get too big
         if max_norm is not None and max_norm is not False:
             grad_norm = gparam.norm(L=2)
-            gparam = (T.minimum(max_norm, grad_norm)/ grad_norm) * gparam
+            gparam = (T.minimum(max_norm, grad_norm)/ (grad_norm + eps)) * gparam
 
         if method == 'adadelta':
             updates[gsum] = T.cast(rho * gsum + (1. - rho) * (gparam **2), theano.config.floatX)
